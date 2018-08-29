@@ -83,6 +83,7 @@ tf.app.flags.DEFINE_boolean('pointer_gen', True, 'If True, use pointer-generator
 tf.app.flags.DEFINE_boolean('rl_training', False, 'Use policy-gradient training by collecting rewards at the end of sequence.')
 tf.app.flags.DEFINE_boolean('self_critic', True, 'Uses greedy sentence reward as baseline.')
 tf.app.flags.DEFINE_boolean('use_discounted_rewards', False, 'Whether to use discounted rewards.')
+tf.app.flags.DEFINE_boolean('use_intermediate_rewards', False, 'Whether to use intermediate rewards.')
 tf.app.flags.DEFINE_boolean('convert_to_reinforce_model', False, 'Convert a pointer model to a reinforce model. Turn this on and run in train mode. Your current training model will be copied to a new version (same name with _cov_init appended) that will be ready to run with coverage flag turned on, for the coverage training stage.')
 tf.app.flags.DEFINE_boolean('intradecoder', False, 'Use intradecoder attention or not')
 tf.app.flags.DEFINE_boolean('use_temporal_attention', False, 'Whether to use temporal attention or not')
@@ -198,7 +199,7 @@ class Seq2Seq(object):
     for ef in event_files:
       try:
         for e in tf.train.summary_iterator(ef):
-          for v in e.summary.value:
+          for v in e.summary:
             step = e.step
             if 'running_avg_loss/decay' in v.tag:
               running_avg_loss = v.simple_value
@@ -664,12 +665,13 @@ class Seq2Seq(object):
     if not os.path.exists(FLAGS.log_root):
       if FLAGS.mode=="train":
         os.makedirs(FLAGS.log_root)
-        fw = open('{}/config.txt'.format(FLAGS.log_root),'w')
-        for k,v in flags.items():
-          fw.write('{}\t{}\n'.format(k,v))
-        fw.close()
       else:
         raise Exception("Logdir %s doesn't exist. Run in train mode to create it." % (FLAGS.log_root))
+
+    fw = open('{}/config.txt'.format(FLAGS.log_root), 'w')
+    for k, v in flags.items():
+      fw.write('{}\t{}\n'.format(k, v))
+    fw.close()
 
     self.vocab = Vocab(FLAGS.vocab_path, FLAGS.vocab_size) # create a vocabulary
 
@@ -701,7 +703,7 @@ class Seq2Seq(object):
     hps_dict = {}
     for key,val in flags.items(): # for each flag
       if key in hparam_list: # if it's in the list
-        hps_dict[key] = val # add it to the dict
+        hps_dict[key] = val.value # add it to the dict
     if FLAGS.ac_training:
       hps_dict.update({'dqn_input_feature_len':(FLAGS.dec_hidden_dim)})
     self.hps = namedtuple("HParams", hps_dict.keys())(**hps_dict)
@@ -720,7 +722,7 @@ class Seq2Seq(object):
       hps_dict = {}
       for key,val in flags.items(): # for each flag
         if key in hparam_list: # if it's in the list
-          hps_dict[key] = val # add it to the dict
+          hps_dict[key] = val.value # add it to the dict
       hps_dict.update({'dqn_input_feature_len':(FLAGS.dec_hidden_dim)})
       hps_dict.update({'vocab_size':self.vocab.size()})
       self.dqn_hps = namedtuple("HParams", hps_dict.keys())(**hps_dict)
@@ -730,7 +732,7 @@ class Seq2Seq(object):
 
     tf.set_random_seed(111) # a seed value for randomness
 
-    if self.hps.mode.value == 'train':
+    if self.hps.mode == 'train':
       print("creating model...")
       self.model = SummarizationModel(self.hps, self.vocab)
       if FLAGS.ac_training:
@@ -739,13 +741,13 @@ class Seq2Seq(object):
         # target DQN with paramters \Psi^{\prime}
         self.dqn_target = DQN(self.dqn_hps,'target')
       self.setup_training()
-    elif self.hps.mode.value == 'eval':
+    elif self.hps.mode == 'eval':
       self.model = SummarizationModel(self.hps, self.vocab)
       if FLAGS.ac_training:
         self.dqn = DQN(self.dqn_hps,'current')
         self.dqn_target = DQN(self.dqn_hps,'target')
       self.run_eval()
-    elif self.hps.mode.value == 'decode':
+    elif self.hps.mode == 'decode':
       decode_model_hps = self.hps  # This will be the hyperparameters for the decoder model
       decode_model_hps = self.hps._replace(max_dec_steps=1) # The model is configured with max_dec_steps=1 because we only ever run one step of the decoder at a time (to do beam search). Note that the batcher is initialized with max_dec_steps equal to e.g. 100 because the batches need to contain the full summaries
       model = SummarizationModel(decode_model_hps, self.vocab)
